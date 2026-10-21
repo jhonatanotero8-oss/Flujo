@@ -475,6 +475,21 @@ button,a{touch-action:manipulation}
 .vrow .f{padding:10px 12px}
 @media (max-width:380px){.vrow{grid-template-columns:1fr}}
 .vsum{display:flex;justify-content:flex-end;gap:14px;font-weight:700;margin-top:12px;font-size:15px}
+
+/* ===== deshacer ===== */
+.undo{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translate(-50%,30px) scale(.95);opacity:0;pointer-events:none;z-index:65;width:min(94vw,480px);display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:linear-gradient(140deg,#1b3a20,#0d1a10);border:1px solid rgba(163,255,79,.5);box-shadow:0 12px 30px rgba(0,0,0,.55),0 0 20px rgba(163,255,79,.18);transition:opacity .25s,transform .35s cubic-bezier(.3,1.5,.5,1)}
+.undo.show{opacity:1;transform:translate(-50%,0) scale(1);pointer-events:auto}
+.undo span{flex:1;min-width:0}.undo b{display:block;font-size:14px;color:var(--neon)}
+.undo small{display:block;font-size:11.5px;color:#cfe3cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.undo button{border:0;border-radius:11px;padding:9px 12px;font-weight:700;font-size:13px;background:var(--neon);color:#0b1405;flex:none}
+.undo .uview{background:rgba(255,255,255,.08);color:var(--ink)}
+.undo::after{content:"";position:absolute;left:12px;right:12px;bottom:4px;height:2px;border-radius:2px;background:rgba(163,255,79,.5);transform-origin:left}
+.undo.show::after{animation:tbar 9s linear forwards}
+
+.vcount{display:none;margin-top:8px;font-size:12.5px;color:#cfe3cc;position:relative;padding-bottom:6px}
+.vcount.on{display:block}
+.vcount i{position:absolute;left:0;right:0;bottom:0;height:3px;border-radius:3px;background:var(--neon);transform-origin:left;box-shadow:0 0 8px rgba(163,255,79,.6)}
+.vcount.on i{animation:tbar 3s linear forwards}
 </style>
 </head>
 <body>
@@ -675,6 +690,7 @@ button,a{touch-action:manipulation}
 <div class="backdrop" id="backdrop"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="undo" id="undoBar" role="status" aria-live="polite"><span><b></b><small></small></span><button type="button" class="uview" data-undo-view>Ver</button><button type="button" data-undo>Deshacer</button></div>
 <div class="saved" id="saved" aria-hidden="true"><div class="burst"><span class="pigover"><span class="piggy happy" data-pig="happy" id="savedPig" style="--pw:130px"></span></span><svg viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7 7 15-16"/></svg><span style="--a:0deg"></span><span style="--a:45deg"></span><span style="--a:90deg"></span><span style="--a:135deg"></span><span style="--a:180deg"></span><span style="--a:225deg"></span><span style="--a:270deg"></span><span style="--a:315deg"></span></div><b id="savedT"></b><em id="savedS"></em></div>
 
 <script>const CATS = {
@@ -1105,6 +1121,8 @@ const VZ = (()=>{
     return v*m;
   }
   // encuentra montos (y suma "2 millones 500 mil")
+  let BIG=true; // pesos colombianos y parecidos: "50" = 50 mil
+  const MESES="enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre";
   function amounts(t){
     const res=[]; let m; NUM.lastIndex=0;
     while((m=NUM.exec(t))){
@@ -1117,7 +1135,10 @@ const VZ = (()=>{
       // descarta horas/fechas sueltas pequeñas sin multiplicador cuando hay contexto de hora
       if(!m[2] && v<100 && /\b(las|la)\s*$/.test(t.slice(0,m.index))) continue;
       if(/^\s*(%|por ?ciento)/.test(t.slice(end))) continue;
-      res.push({v,start:m.index,end});
+      if(new RegExp("^\\s*(de\\s+)?("+MESES+")\\b").test(t.slice(end))) continue;   // "15 de octubre"
+      let bare=false, next="";
+      if(!m[2] && BIG && v<1000){ v*=1000; bare=true; next=(/^\s*([a-zñ]+)/.exec(t.slice(end))||[])[1]||""; }
+      res.push({v,start:m.index,end,bare,next});
     }
     return res;
   }
@@ -1153,6 +1174,9 @@ const VZ = (()=>{
   function cap(s){ s=s.trim().replace(/\s+/g," "); return s?s.charAt(0).toUpperCase()+s.slice(1):s; }
   function dateOf(t,today,prev){
     const dd=(n)=>{ const [y,m,d]=today.split("-").map(Number); return new Date(Date.UTC(y,m-1,d-n)).toISOString().slice(0,10); };
+    const md=new RegExp("\\b(\\d{1,2})\\s+de\\s+("+MESES+")\\b").exec(t);
+    if(md){ const MS=MESES.split("|").filter(x=>x!=="setiembre"); let mi=MS.indexOf(md[2]); if(md[2]==="setiembre") mi=8; const y=Number(today.slice(0,4));
+      let iso=`${y}-${String(mi+1).padStart(2,"0")}-${String(Math.min(31,Number(md[1]))).padStart(2,"0")}`; if(iso>today) iso=`${y-1}`+iso.slice(4); return iso; }
     if(/\b(antier|anteayer|antes de ayer)\b/.test(t)) return dd(2);
     if(/\bayer\b/.test(t)) return dd(1);
     if(/\bhoy\b/.test(t)) return today;
@@ -1170,6 +1194,7 @@ const VZ = (()=>{
   }
   function parse(text, ctx){
     ctx=ctx||{}; const today=ctx.today, metas=ctx.metas||[];
+    BIG = !ctx.currency || ["COP","CLP","ARS"].includes(ctx.currency);
     const raw=String(text||"").trim(); if(!raw) return [];
     const sraw=strip(raw.normalize("NFC")), nraw=raw.normalize("NFC");
     const restore=d=>{ if(!d) return d; const i=sraw.indexOf(d); return (i>=0 && sraw.length===nraw.length) ? nraw.substr(i,d.length).toLowerCase() : d; };
@@ -1188,6 +1213,7 @@ const VZ = (()=>{
     const out=[]; let lastTipo=null, lastDate=null, lastPerson="";
     merged.forEach(x=>{
       const c=x.p; let a=amounts(c);
+      if(a.length>1){ const PREP=/^(en|de|del|para|pa|por|y|pesos|mil|lucas|el|la|hoy|ayer|antier|que|a)$/; const keep=a.filter(z=>!(z.bare && z.next && !PREP.test(z.next))); if(keep.length) a=keep; }
       const prevIng=[...out].reverse().find(o=>o.tipo==="ingreso")||out[out.length-1];
       const pc=pctOf(c);
       if(!a.length){ if(pc==null||!prevIng) return; const ps=PCT.exec(c); a=[{v:Math.round(prevIng.monto*pc),start:ps.index,end:ps.index+ps[0].length}]; }
@@ -1198,7 +1224,7 @@ const VZ = (()=>{
       const fecha=dateOf(c,today,lastDate);
       // descripción: lo que va después del monto (en/de/para…) o antes
       const am=a[0]; let after=c.slice(am.end).trim(), before=c.slice(0,am.start).trim();
-      const clean=d=>{ d=(d||"").replace(/\b(hoy|ayer|antier|anteayer|el (lunes|martes|miercoles|jueves|viernes|sabado|domingo)( pasado)?|(el )?(lunes|martes|miercoles|jueves|viernes|sabado|domingo)( pasado)?)\b/g," ")
+      const clean=d=>{ d=(d||"").replace(new RegExp("\\b(el\\s+)?\\d{1,2}\\s+de\\s+("+MESES+")\\b","g")," ").replace(/\b(hoy|ayer|antier|anteayer|el (lunes|martes|miercoles|jueves|viernes|sabado|domingo)( pasado)?|(el )?(lunes|martes|miercoles|jueves|viernes|sabado|domingo)( pasado)?)\b/g," ")
           .replace(/\b(me|le|les)\s*$/,"").replace(/\s+/g," ").trim();
         for(let k=0;k<4;k++) d=d.replace(STOP,"");
         for(let k=0;k<3;k++) d=d.replace(/\s+(por|de|en|a|para|como|que|y|el|la|los|las|un|una|unos|unas)$/,"");
@@ -1235,22 +1261,23 @@ const VZ = (()=>{
 
 /* ---------- Háblale a FLUJO ---------- */
 const SRC = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec=null, recOn=false, vBase="", vBusy=false;
+let rec=null, recOn=false, vBase="", vBusy=false, vSilence=null, vTypeT=null;
 const VTYPES={gasto:["Gasto","t-g"],ingreso:["Ingreso","t-i"],prestamo:["Préstamo","t-p"],deuda:["Deuda","t-d"],ahorro:["Ahorro","t-a"]};
-const VEX=["Gasté 20 mil en almuerzo y 10 mil en bus","Me pagaron 200 mil por un trabajo extra","Ayer pagué el arriendo, 800 mil","Le presté 50 mil a Carlos","Me pagaron 200 mil y toma 50 mil de eso pal ahorro"];
+const VEX=["Gasté 20 mil en almuerzo y 10 mil en bus","Me pagaron 200 mil por un trabajo extra","Ayer pagué el arriendo, 800 mil","Le presté 50 mil a Carlos","Me entraron 50 y gasté 10 en almuerzo"];
 function openVoice(prefill){
   S.sheet={kind:"voice"}; S.vItems=[];
   openSheet(`<h3>🎤 Háblale a FLUJO</h3>
-    <p class="small" style="margin:0 0 4px">Cuéntame qué hiciste con tu plata, como si me mandaras un audio. Yo lo anoto.</p>
+    <p class="small" style="margin:0 0 4px">Cuéntame qué hiciste con tu plata, como si me mandaras un audio. Cuando termines, lo anoto solo ✨</p>
     <div class="micwrap"><button type="button" class="micbig ${SRC?"":"off"}" id="micBtn" data-mic aria-label="Hablar"><span>🎤</span></button></div>
-    <p class="mstat" id="micStat">${SRC?"Toca el micrófono y habla":"Toca el cuadro de abajo y usa el micrófono 🎙️ de tu teclado para dictar"}</p>
+    <p class="mstat" id="micStat">${SRC?"Toca el micrófono y habla. Cuando termines, lo anoto solo ✨":"Toca el cuadro de abajo y usa el micrófono 🎙️ de tu teclado. Cuando termines, lo anoto solo ✨"}</p>
     <textarea class="f vtext" id="vText" rows="3" placeholder="Ej: gasté 20 mil en almuerzo y me pagaron 200 mil por un trabajo extra"></textarea>
+    <div class="vcount" id="vCount"><i></i><span>Anotando solo en un momento… sigue hablando si te falta algo</span></div>
     <div class="qa">${VEX.map(e=>`<button type="button" data-vex="${esc(e)}">“${esc(e)}”</button>`).join("")}</div>
-    <button class="btn" data-vparse>Entender lo que dije</button>
+    <button class="btn out" data-vparse style="margin-top:12px">Anotar ya</button>
     <div id="vRes"></div>`);
   if(prefill){ $("vText").value=prefill; vParse(); }
 }
-function vStop(){ if(rec&&recOn){ try{ rec.stop(); }catch(e){} } }
+function vStop(){ clearTimeout(vSilence); clearTimeout(vTypeT); const cd=$("vCount"); if(cd) cd.classList.remove("on"); if(rec&&recOn){ try{ rec.stop(); }catch(e){} } }
 function vMic(){
   const btn=$("micBtn"), st=$("micStat");
   if(!SRC){ $("vText").focus(); toast("Usa el micrófono de tu teclado para dictar 🎙️"); return; }
@@ -1258,18 +1285,20 @@ function vMic(){
   try{
     rec=new SRC(); rec.lang="es-CO"; rec.interimResults=true; rec.continuous=true; rec.maxAlternatives=1;
     vBase=$("vText").value.trim(); if(vBase) vBase+=". ";
-    rec.onstart=()=>{ recOn=true; btn.classList.add("on"); st.textContent="Te escucho… toca otra vez cuando termines"; };
-    rec.onresult=e=>{ let fin="", tmp=""; for(let i=0;i<e.results.length;i++){ const r=e.results[i]; (r.isFinal?(fin+=r[0].transcript+" "):(tmp+=r[0].transcript)); } $("vText").value=(vBase+fin+tmp).trim(); };
+    rec.onstart=()=>{ recOn=true; btn.classList.add("on"); st.textContent="Te escucho… cuando termines de hablar, lo anoto solo"; clearTimeout(vTypeT); clearTimeout(vSilence); vSilence=setTimeout(()=>{ if(recOn && !$("vText").value.trim()){ vStop(); st.textContent="No te escuché. Toca el micrófono e intenta otra vez."; } },7000); };
+    rec.onresult=e=>{ let fin="", tmp=""; for(let i=0;i<e.results.length;i++){ const r=e.results[i]; (r.isFinal?(fin+=r[0].transcript+" "):(tmp+=r[0].transcript)); } $("vText").value=(vBase+fin+tmp).trim();
+      clearTimeout(vSilence); vSilence=setTimeout(()=>{ if(recOn){ st.textContent="Anotando…"; vStop(); } }, tmp? 2200 : 1400); };
     rec.onerror=e=>{ recOn=false; btn.classList.remove("on");
       st.textContent = (e.error==="not-allowed"||e.error==="service-not-allowed") ? "No tengo permiso para usar el micrófono. Puedes escribir o usar el micrófono del teclado 🎙️" : e.error==="no-speech" ? "No te escuché. Toca el micrófono e intenta otra vez." : "No pude escuchar. Usa el micrófono 🎙️ de tu teclado."; };
-    rec.onend=()=>{ const was=recOn; recOn=false; if(btn) btn.classList.remove("on"); if(st && was) st.textContent="Listo. Revisa abajo lo que entendí 👇"; if($("vText") && $("vText").value.trim()) vParse(); };
+    rec.onend=()=>{ const was=recOn; recOn=false; if(btn) btn.classList.remove("on"); if(st && was) st.textContent="Anotando…"; if($("vText") && $("vText").value.trim()) vParse(true); };
     rec.start();
   }catch(e){ st.textContent="No pude abrir el micrófono. Usa el micrófono 🎙️ de tu teclado."; }
 }
-function vParse(){
+function vParse(auto){
   const txt=$("vText").value.trim();
   if(!txt){ toast("Dime o escribe qué hiciste con tu plata.","over"); return; }
-  S.vItems=VZ.parse(txt,{today:todayISO(),metas:state.metas||[]});
+  S.vItems=VZ.parse(txt,{today:todayISO(),metas:state.metas||[],currency:state.currency});
+  if(auto && S.vItems.length && S.vItems.every(x=>x.monto>0)) return vSave(true);
   vRender();
 }
 function vRender(){
@@ -1294,12 +1323,13 @@ function vRender(){
    `<div class="vsum">${tot("ingreso")?`<span class="neon">+${fmt(tot("ingreso"))}</span>`:""}${tot("gasto")?`<span class="red">−${fmt(tot("gasto"))}</span>`:""}</div>
     <button class="btn" data-vsave>Guardar ${it.length===1?"este movimiento":`estos ${it.length} movimientos`}</button>`;
 }
-function vSave(){
-  if(vBusy) return; const it=(S.vItems||[]).filter(x=>x.monto>0);
+function vSave(auto){
+  if(vBusy) return;
+  const refs={movs:[],loans:[],abonos:[],meta:null}; const it=(S.vItems||[]).filter(x=>x.monto>0);
   if(!it.length) return toast("No hay nada para guardar.","over");
   const sinMeta=it.filter(x=>x.tipo==="ahorro"&&!(state.metas||[]).find(g=>g.id===x.metaId));
   if(sinMeta.length){ let g=(state.metas||[]).find(g=>g.nombre==="Mis ahorros");
-    if(!g){ const tot=sinMeta.reduce((s,x)=>s+x.monto,0); g={id:uid(),nombre:"Mis ahorros",emoji:"🐷",meta:Math.max(tot*10,noDec()?1000000:1000),fecha:"",abonos:[],creado:Date.now()}; state.metas.push(g); }
+    if(!g){ const tot=sinMeta.reduce((s,x)=>s+x.monto,0); g={id:uid(),nombre:"Mis ahorros",emoji:"🐷",meta:Math.max(tot*10,noDec()?1000000:1000),fecha:"",abonos:[],creado:Date.now()}; state.metas.push(g); refs.meta=g.id; }
     sinMeta.forEach(x=>x.metaId=g.id); }
   vBusy=true; setTimeout(()=>vBusy=false,900);
   const cnt={gasto:[0,0],ingreso:[0,0],prestamo:[0,0],deuda:[0,0],ahorro:[0,0]};
@@ -1307,11 +1337,13 @@ function vSave(){
     const fecha=/^\d{4}-\d{2}-\d{2}$/.test(x.fecha)?x.fecha:todayISO();
     if(x.tipo==="gasto"||x.tipo==="ingreso"){
       const ok=CATS[x.tipo].some(([c])=>c===x.categoria); const categoria=ok?x.categoria:(x.tipo==="gasto"?"Otros gastos":"Otros ingresos");
-      state.movs.push({id:uid(),tipo:x.tipo,monto:x.monto,categoria,desc:(x.desc||"").trim(),fecha,creado:Date.now(),voz:true});
+      const nid=uid(); refs.movs.push(nid);
+      state.movs.push({id:nid,tipo:x.tipo,monto:x.monto,categoria,desc:(x.desc||"").trim(),fecha,creado:Date.now(),voz:true});
     } else if(x.tipo==="prestamo"||x.tipo==="deuda"){
-      state.loans.push({id:uid(),kind:x.tipo==="prestamo"?"presto":"debo",persona:(x.persona||"").trim()||"Sin nombre",monto:x.monto,fecha,vence:"",nota:(x.desc||"").trim(),abonos:[],creado:Date.now()});
+      const lid=uid(); refs.loans.push(lid);
+      state.loans.push({id:lid,kind:x.tipo==="prestamo"?"presto":"debo",persona:(x.persona||"").trim()||"Sin nombre",monto:x.monto,fecha,vence:"",nota:(x.desc||"").trim(),abonos:[],creado:Date.now()});
     } else if(x.tipo==="ahorro"){
-      const g=state.metas.find(g=>g.id===x.metaId); g.abonos.push({id:uid(),monto:x.monto,fecha});
+      const g=state.metas.find(g=>g.id===x.metaId), aid=uid(); refs.abonos.push(aid); g.abonos.push({id:aid,monto:x.monto,fecha});
     }
     cnt[x.tipo][0]++; cnt[x.tipo][1]+=x.monto;
   });
@@ -1325,6 +1357,7 @@ function vSave(){
   const md=pigMood(), good=cnt.ingreso[0]||cnt.ahorro[0];
   showSaved("¡Anotado! 🎤", parts.join(" · ")+` · Disponible: ${fmt(dispOf())}`, good?"":"out", good?"happy":(md.m==="sad"?"sad":"happy"));
   pigReact(good?"party":(cnt.deuda[0]?"ouch":"party"));
+  const n=it.length; setTimeout(()=>showUndo(`✓ Anoté ${n===1?"1 movimiento":n+" movimientos"}`, refs, parts.join(" · ")), RM.matches?300:1250);
   // avisos de presupuesto
   const by=byCatOf(todayISO().slice(0,7),"gasto"), bu=state.budgets||{};
   const over=Object.keys(bu).filter(c=>(by[c]||0)>bu[c] && it.some(x=>x.tipo==="gasto"&&x.categoria===c));
@@ -1332,6 +1365,32 @@ function vSave(){
 }
 document.addEventListener("input",e=>{ const t=e.target; if(t.dataset && t.dataset.vf && S.vItems){ const i=Number(t.dataset.i), f=t.dataset.vf; if(!S.vItems[i]) return; S.vItems[i][f]= f==="monto" ? (parseAmount(t.value)||0) : t.value; if(f==="monto"){ const s=document.querySelector(".vsum"); if(s){ const it=S.vItems, tot=k=>it.filter(x=>x.tipo===k).reduce((a,x)=>a+(x.monto||0),0); s.innerHTML=`${tot("ingreso")?`<span class="neon">+${fmt(tot("ingreso"))}</span>`:""}${tot("gasto")?`<span class="red">−${fmt(tot("gasto"))}</span>`:""}`; } } } });
 document.addEventListener("change",e=>{ const t=e.target; if(t.dataset && t.dataset.vf && S.vItems && S.vItems[Number(t.dataset.i)]) S.vItems[Number(t.dataset.i)][t.dataset.vf]=t.dataset.vf==="monto"?(parseAmount(t.value)||0):t.value; });
+
+document.addEventListener("input",e=>{
+  if(e.target.id!=="vText" || recOn) return;
+  clearTimeout(vTypeT); const cd=$("vCount"); const txt=e.target.value.trim();
+  if(cd){ cd.classList.remove("on"); }
+  if(!txt) return;
+  const items=VZ.parse(txt,{today:todayISO(),metas:state.metas||[],currency:state.currency});
+  if(!items.length) return;
+  if(cd){ void cd.offsetWidth; cd.classList.add("on"); }
+  vTypeT=setTimeout(()=>{ if($("vText") && $("vText").value.trim()===txt) vParse(true); }, 3000);
+});
+/* ---------- deshacer ---------- */
+let lastUndo=null, undoT;
+function showUndo(msg, refs, detail){
+  lastUndo=refs; const b=$("undoBar"); b.querySelector("b").textContent=msg; b.querySelector("small").textContent=detail||"";
+  b.classList.remove("show"); void b.offsetWidth; b.classList.add("show");
+  clearTimeout(undoT); undoT=setTimeout(()=>{ b.classList.remove("show"); lastUndo=null; },9000);
+}
+function doUndo(){
+  const r=lastUndo; if(!r) return; lastUndo=null; clearTimeout(undoT); $("undoBar").classList.remove("show");
+  state.movs=state.movs.filter(m=>!r.movs.includes(m.id));
+  state.loans=state.loans.filter(l=>!r.loans.includes(l.id));
+  (state.metas||[]).forEach(g=>{ g.abonos=(g.abonos||[]).filter(a=>!r.abonos.includes(a.id)); });
+  if(r.meta) state.metas=state.metas.filter(g=>!(g.id===r.meta && !(g.abonos||[]).length));
+  save(); render(); toast("Listo, lo deshice. Puedes volver a decirlo 🎤");
+}
 
 function openSheet(html){ const sh=$("sheet"); sh.innerHTML=`<div class="grab"></div><button class="x" data-close aria-label="Cerrar">✕</button>`+html; sh.classList.add("show"); sh.setAttribute("aria-hidden","false"); $("backdrop").classList.add("show"); }
 function closeSheet(){ try{ vStop(); }catch(e){} $("sheet").classList.remove("show"); $("sheet").setAttribute("aria-hidden","true"); $("backdrop").classList.remove("show"); S.sheet=null; }
@@ -1512,8 +1571,8 @@ document.addEventListener("click", e=>{
     if(d.savebud!==undefined){ const v=parseAmount($("bAmt").value); if(!(v>0)) return toast("Escribe un límite mayor que cero.","over"); state.budgets[sh.c]=v; save(); closeSheet(); render(); return toast(`Límite de ${sh.c}: ${fmt(v)} al mes.`); }
     if(d.delbud!==undefined){ delete state.budgets[sh.c]; save(); closeSheet(); render(); return toast("Límite quitado."); }
     if(d.mic!==undefined) return vMic();
-    if(d.vparse!==undefined){ vStop(); return vParse(); }
-    if(d.vex){ $("vText").value=d.vex; return vParse(); }
+    if(d.vparse!==undefined){ vStop(); return vParse(true); }
+    if(d.vex){ $("vText").value=d.vex; $("vText").focus(); return; }
     if(d.vdel){ S.vItems.splice(Number(d.vdel),1); return vRender(); }
     if(d.vtype){ const x=S.vItems[Number(d.vtype)], order=["gasto","ingreso","ahorro","prestamo","deuda"]; x.tipo=order[(order.indexOf(x.tipo)+1)%order.length];
       if(x.tipo==="gasto"||x.tipo==="ingreso"){ if(!CATS[x.tipo].some(([c])=>c===x.categoria)) x.categoria=x.tipo==="gasto"?"Otros gastos":"Otros ingresos"; }
@@ -1537,6 +1596,8 @@ document.addEventListener("click", e=>{
   }
   if(d.back!==undefined) return go(PARENT[S.view]||"home");
   if(d.voice!==undefined) return openVoice();
+  if(d.undo!==undefined) return doUndo();
+  if(d.undoView!==undefined){ $("undoBar").classList.remove("show"); return go("list",{filter:"todos"}); }
   if(d.bell!==undefined){ const a=alertList(); S.sheet={kind:"bell"}; return openSheet(`<h3>🔔 Notificaciones</h3>${a.length?a.join(""):`<p class="empty">Todo en orden. No tienes avisos por ahora.</p>`}`); }
   if(d.go) return go(d.go,{filter:d.f,lt:d.lt});
   if(d.mshift){ S.month=shiftMonth(S.month,Number(d.mshift)); return render(); }
